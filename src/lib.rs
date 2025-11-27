@@ -10,8 +10,8 @@
 
 extern crate embedded_hal as hal;
 
-use hal::blocking::delay::DelayMs;
-use hal::blocking::i2c::{Write, Read};
+use hal::delay::DelayNs;
+use hal::i2c::{I2c, SevenBitAddress};
 
 #[allow(dead_code)]
 #[derive(Copy, Clone)]
@@ -120,10 +120,10 @@ pub struct BH1750<I2C, D> {
     delay: D,
 }
 
-impl <I2C, D, E> BH1750<I2C, D>
+impl <I2C, D> BH1750<I2C, D>
 where
-    I2C: Read<Error = E> + Write<Error = E>,
-    D: DelayMs<u16>,
+    I2C: I2c<SevenBitAddress>,
+    D: DelayNs
 {
     /// Creates a new driver from an I2C peripheral.
     pub fn new(i2c: I2C, delay: D) -> Self {
@@ -150,7 +150,7 @@ where
     }
 
     /// Measure illuminance.
-    pub fn illuminance(&mut self) -> Result<f32, E> {
+    pub fn illuminance(&mut self) -> Result<f32, I2C::Error> {
         let cmd = self.measurement_command();
         self.command(cmd)?;
         self.delay();
@@ -164,7 +164,7 @@ where
     }
 
     /// Set measurement time.
-    pub fn set_measurement_time(&mut self, mt: MeasurementTime) -> Result<(), E> {
+    pub fn set_measurement_time(&mut self, mt: MeasurementTime) -> Result<(), I2C::Error> {
         // Sensor doesn't support multiple commands without stop condition.
         self.i2c.write(self.addr.addr(), &[mt.high_byte()])?;
         self.i2c.write(self.addr.addr(), &[mt.low_byte()])?;
@@ -178,22 +178,22 @@ where
     }
 
     /// Wakeup from sleep mode.
-    pub fn power_on(&mut self) -> Result<(), E> {
+    pub fn power_on(&mut self) -> Result<(), I2C::Error> {
         self.command(Command::PowerOn)
     }
 
     /// Stop all measurements and enter sleep mode.
-    pub fn power_down(&mut self) -> Result<(), E> {
+    pub fn power_down(&mut self) -> Result<(), I2C::Error> {
         self.command(Command::PowerDown)
     }
 
     /// Reset Data register value.
-    pub fn reset(&mut self) -> Result<(), E> {
+    pub fn reset(&mut self) -> Result<(), I2C::Error> {
         self.power_on()?;
         self.command(Command::Reset)
     }
 
-    fn command(&mut self, command: Command) -> Result<(), E> {
+    fn command(&mut self, command: Command) -> Result<(), I2C::Error> {
         self.i2c.write(self.addr.addr(), &[command.cmd()])
     }
 
@@ -210,7 +210,7 @@ where
             },
         };
 
-        self.delay.delay_ms(delay);
+        self.delay.delay_ms(delay as u32);
     }
 
     fn measurement_command(&self) -> Command {
@@ -228,7 +228,7 @@ where
         }
     }
 
-    fn read_measurement(&mut self) -> Result<f32, E> {
+    fn read_measurement(&mut self) -> Result<f32, I2C::Error> {
         let value = self.read_u16()? as f32 / 1.2;
         let scaling = match self.mt {
             MeasurementTime::Default => 1.0,
@@ -243,7 +243,7 @@ where
         Ok(light)
     }
 
-    fn read_u16(&mut self) -> Result<u16, E> {
+    fn read_u16(&mut self) -> Result<u16, I2C::Error> {
         let mut buffer = [0, 0];
         self.i2c.read(self.addr.addr(), &mut buffer)?;
         Ok(((buffer[0] as u16) << 8) + (buffer[1] as u16))
